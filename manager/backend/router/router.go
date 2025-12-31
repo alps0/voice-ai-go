@@ -14,11 +14,11 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	r := gin.Default()
 
 	// CORS配置
-	config := cors.DefaultConfig()
-	config.AllowAllOrigins = true
-	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
-	config.AllowCredentials = true
-	r.Use(cors.New(config))
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowAllOrigins = true
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	corsConfig.AllowCredentials = true
+	r.Use(cors.New(corsConfig))
 
 	// 初始化控制器
 	authController := &controllers.AuthController{DB: db}
@@ -28,6 +28,22 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	deviceActivationController := &controllers.DeviceActivationController{DB: db}
 	setupController := &controllers.SetupController{DB: db}
 	speakerGroupController := controllers.NewSpeakerGroupController(db, cfg)
+
+	// 初始化聊天历史控制器（需要配置）
+	cfg = config.Load()
+	audioBasePath := "./storage/chat_history/audio"
+	maxFileSize := int64(10 * 1024 * 1024) // 默认10MB
+	if cfg.History.AudioBasePath != "" {
+		audioBasePath = cfg.History.AudioBasePath
+	}
+	if cfg.History.MaxFileSize > 0 {
+		maxFileSize = cfg.History.MaxFileSize
+	}
+	chatHistoryController := &controllers.ChatHistoryController{
+		DB:            db,
+		AudioBasePath: audioBasePath,
+		MaxFileSize:   maxFileSize,
+	}
 
 	// API路由组
 	api := r.Group("/api")
@@ -48,6 +64,9 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		// 内部服务接口（无需认证）
 		api.GET("/configs", adminController.GetDeviceConfigs)
 		api.GET("/system/configs", adminController.GetSystemConfigs)
+		api.POST("/internal/history/messages", chatHistoryController.SaveMessage)                         // 保存消息（内部服务接口）
+		api.PUT("/internal/history/messages/:message_id/audio", chatHistoryController.UpdateMessageAudio) // 更新消息音频（内部服务接口）
+		api.GET("/internal/history/messages", chatHistoryController.GetMessagesForInit)                   // 获取消息（用于初始化加载，内部服务接口）
 
 		// 需要认证的路由
 		auth := api.Group("")
@@ -102,6 +121,13 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				user.GET("/speaker-groups/:id/samples", speakerGroupController.GetSamples)
 				user.GET("/speaker-groups/:id/samples/:sample_id/file", speakerGroupController.GetSampleFile)
 				user.DELETE("/speaker-groups/:id/samples/:sample_id", speakerGroupController.DeleteSample)
+
+				// 聊天历史
+				user.GET("/history/messages", chatHistoryController.GetMessages)
+				user.DELETE("/history/messages/:id", chatHistoryController.DeleteMessage)
+				user.GET("/history/export", chatHistoryController.ExportMessages)
+				user.GET("/history/agents/:agent_id/messages", chatHistoryController.GetMessagesByAgent)
+				user.GET("/history/messages/:id/audio", chatHistoryController.GetAudioFile)
 			}
 
 			// 管理员路由
