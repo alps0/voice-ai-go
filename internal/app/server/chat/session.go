@@ -876,10 +876,10 @@ func (s *ChatSession) OnListenStart() error {
 
 				// 获取暂存的声纹结果（带超时）
 				var speakerResult *speaker.IdentifyResult
-				log.Debugf("s.speakerManager: %+v, IsActive: %+v", s.speakerManager, s.speakerManager.IsActive())
 				if s.speakerManager != nil {
+					log.Debugf("s.speakerManager: %+v, IsActive: %+v", s.speakerManager, s.speakerManager.IsActive())
+
 					timeout := time.NewTimer(200 * time.Millisecond)
-					defer timeout.Stop()
 					select {
 					case <-s.speakerResultReady:
 						timeout.Stop()
@@ -893,6 +893,7 @@ func (s *ChatSession) OnListenStart() error {
 						s.speakerResultMu.RUnlock()
 						log.Debugf("获取声纹识别结果超时，使用当前结果")
 					}
+					timeout.Stop()
 					log.Debugf("获取声纹识别结果: %+v", speakerResult)
 				}
 
@@ -1009,6 +1010,10 @@ func (s *ChatSession) Close() {
 
 	// 取消会话级别的上下文
 	s.cancel()
+
+	if s.speakerManager != nil {
+		s.speakerManager.Close()
+	}
 
 	if s.clientState != nil {
 		eventbus.Get().Publish(eventbus.TopicSessionEnd, s.clientState)
