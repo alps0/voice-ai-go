@@ -44,7 +44,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
       - 安装 Opus 相关依赖：
         ```bash
         sudo apt-get update
-        sudo apt-get install -y libopus0 libopusfile-dev
+        sudo apt-get install -y pkg-config libopus0 libopusfile-dev
         ```
       - 安装 ONNX Runtime：
         ```bash
