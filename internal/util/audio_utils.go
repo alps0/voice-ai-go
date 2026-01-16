@@ -225,11 +225,16 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 		log.Debugf("将多声道音频转换为单声道输出")
 	}
 
+	opusSampleRate := int(sampleRate)
+	if d.targetSampleRate > 0 {
+		opusSampleRate = d.targetSampleRate
+	}
+
 	// 根据目标格式决定是否创建Opus编码器
 	var enc *opus.Encoder
 	var err error
 	if d.TargetAudioFormat == "opus" {
-		enc, err = opus.NewEncoder(int(sampleRate), outputChannels, opus.AppAudio)
+		enc, err = opus.NewEncoder(opusSampleRate, outputChannels, opus.AppAudio)
 		if err != nil {
 			return fmt.Errorf("创建Opus编码器失败: %v", err)
 		}
@@ -237,10 +242,12 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 	}
 
 	//opus相关配置及缓冲区
-	frameDurationMs := d.perFrameDurationMs              //每帧时长(ms)
-	frameSize := sampleRate * frameDurationMs / 1000     //每帧采样点数
-	pcmBuffer := make([]int16, frameSize*outputChannels) //PCM缓冲区
-	opusBuffer := make([]byte, 1000)                     //Opus输出缓冲区
+	frameDurationMs := d.perFrameDurationMs               //每帧时长(ms)
+	frameSize := int(sampleRate) * frameDurationMs / 1000 //每帧采样点数（基于原始采样率）
+	pcmBuffer := make([]int16, frameSize*outputChannels)  //PCM缓冲区
+	opusBuffer := make([]byte, 1000)                      //Opus输出缓冲区
+
+	log.Debugf("WAV/PCM解码器开始，原始采样率: %d, 目标采样率: %d, 帧大小: %d, 目标格式: %s", sampleRate, opusSampleRate, frameSize, d.TargetAudioFormat)
 
 	// 用于读取原始PCM数据的缓冲区
 	rawBuffer := make([]byte, frameSize*channels*2) // 16位采样=2字节
@@ -256,23 +263,47 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 			// 读取PCM数据
 			n, err := d.pipeReader.Read(rawBuffer)
 			if err == io.EOF {
+				log.Debugf("WAV/PCM流读取结束，处理剩余数据")
 				// 处理剩余不足一帧的数据
 				if currentFramePos > 0 {
-					paddedFrame := make([]int16, frameSize)
-					copy(paddedFrame, pcmBuffer[:currentFramePos])
+					// 创建一个完整的帧缓冲区，用0填充剩余部分
+					paddedFrame := make([]int16, len(pcmBuffer))
+					copy(paddedFrame, pcmBuffer[:currentFramePos]) // 将有效数据复制到开头，剩余部分默认为0
+
+					var opusPcmBuffer []int16 = paddedFrame
+					if d.targetSampleRate > 0 && d.targetSampleRate != sampleRate {
+						pcmBytes := Int16SliceToBytes(opusPcmBuffer)
+						pcmFloat32 := PCM16BytesToFloat32(pcmBytes)
+						pcmFloat32 = ResampleLinearFloat32(pcmFloat32, sampleRate, d.targetSampleRate)
+						opusPcmBuffer = Float32SliceToInt16Slice(pcmFloat32)
+					}
 
 					// 根据目标格式输出数据
 					if d.TargetAudioFormat == "opus" {
 						// 编码最后一帧
-						if n, err := d.enc.Encode(paddedFrame, opusBuffer); err == nil {
+						n, err := enc.Encode(opusPcmBuffer, opusBuffer)
+						if err != nil {
+							log.Errorf("编码剩余数据失败: %v", err)
+							return fmt.Errorf("编码剩余数据失败: %v", err)
+						} else {
 							frameData := make([]byte, n)
 							copy(frameData, opusBuffer[:n])
-							d.outputOpusChan <- frameData
+							select {
+							case <-d.ctx.Done():
+								log.Debugf("wavDecoder context done, exit")
+								return nil
+							case d.outputOpusChan <- frameData:
+							}
 						}
 					} else if d.TargetAudioFormat == "pcm" {
 						// 直接输出PCM数据
-						pcmData := Int16SliceToBytes(paddedFrame)
-						d.outputOpusChan <- pcmData
+						pcmData := Int16SliceToBytes(opusPcmBuffer)
+						select {
+						case <-d.ctx.Done():
+							log.Debugf("wavDecoder context done, exit")
+							return nil
+						case d.outputOpusChan <- pcmData:
+						}
 					}
 				}
 				return nil
@@ -298,27 +329,42 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 				currentFramePos++
 
 				// 如果缓冲区已满,进行编码或输出
-				if currentFramePos == frameSize {
+				if currentFramePos == len(pcmBuffer) {
 					if !firstFrame {
 						firstFrame = true
 						log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
 					}
 
+					var opusPcmBuffer []int16 = pcmBuffer
+					if d.targetSampleRate > 0 && d.targetSampleRate != sampleRate {
+						pcmBytes := Int16SliceToBytes(opusPcmBuffer)
+						pcmFloat32 := PCM16BytesToFloat32(pcmBytes)
+						pcmFloat32 = ResampleLinearFloat32(pcmFloat32, sampleRate, d.targetSampleRate)
+						opusPcmBuffer = Float32SliceToInt16Slice(pcmFloat32)
+					}
+
 					if d.TargetAudioFormat == "opus" {
 						// Opus编码输出
-						if n, err := d.enc.Encode(pcmBuffer, opusBuffer); err == nil {
-							frameData := make([]byte, n)
-							copy(frameData, opusBuffer[:n])
-							select {
-							case <-d.ctx.Done():
-								log.Debugf("wavDecoder context done, exit")
-								return nil
-							case d.outputOpusChan <- frameData:
-							}
+						opusLen, err := enc.Encode(opusPcmBuffer, opusBuffer)
+						if err != nil {
+							log.Errorf("WAV/PCM解码编码失败: %v", err)
+							// 编码失败时，跳过这一帧但继续处理
+							currentFramePos = 0 // 重置帧位置
+							continue
+						}
+
+						// 将当前帧复制到新的切片中
+						frameData := make([]byte, opusLen)
+						copy(frameData, opusBuffer[:opusLen])
+						select {
+						case <-d.ctx.Done():
+							log.Debugf("wavDecoder context done, exit")
+							return nil
+						case d.outputOpusChan <- frameData:
 						}
 					} else if d.TargetAudioFormat == "pcm" {
 						// 直接输出PCM数据
-						pcmData := Int16SliceToBytes(pcmBuffer)
+						pcmData := Int16SliceToBytes(opusPcmBuffer)
 						select {
 						case <-d.ctx.Done():
 							log.Debugf("wavDecoder context done, exit")
@@ -395,7 +441,7 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 	var firstFrame bool
 	frameCount := 0
 
-	log.Debugf("MP3解码器开始，目标采样率: %d, 帧大小: %d, 目标格式: %s", opusSampleRate, frameSize, d.TargetAudioFormat)
+	log.Debugf("MP3解码器开始，原始采样率: %d, 目标采样率: %d, 帧大小: %d, 目标格式: %s", int(sampleRate), opusSampleRate, frameSize, d.TargetAudioFormat)
 
 	for {
 		select {
@@ -405,9 +451,6 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 		default:
 			// 从MP3读取PCM数据
 			n, ok := d.streamer.Stream(mp3Buffer)
-			if !firstFrame {
-				log.Infof("tts云端首帧耗时: %d ms", time.Now().UnixMilli()-startTs)
-			}
 
 			if !ok {
 				log.Debugf("MP3流读取结束，处理剩余数据")
@@ -418,7 +461,7 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 					copy(paddedFrame, pcmBuffer[:currentFramePos]) // 将有效数据复制到开头，剩余部分默认为0
 
 					var opusPcmBuffer []int16 = paddedFrame
-					if d.targetSampleRate > 0 {
+					if d.targetSampleRate > 0 && d.targetSampleRate != int(sampleRate) {
 						pcmBytes := Int16SliceToBytes(opusPcmBuffer)
 						pcmFloat32 := PCM16BytesToFloat32(pcmBytes)
 						pcmFloat32 = ResampleLinearFloat32(pcmFloat32, int(sampleRate), d.targetSampleRate)
@@ -490,7 +533,7 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 					}
 
 					var opusPcmBuffer []int16 = pcmBuffer
-					if d.targetSampleRate > 0 {
+					if d.targetSampleRate > 0 && d.targetSampleRate != int(sampleRate) {
 						pcmBytes := Int16SliceToBytes(opusPcmBuffer)
 						pcmFloat32 := PCM16BytesToFloat32(pcmBytes)
 						pcmFloat32 = ResampleLinearFloat32(pcmFloat32, int(sampleRate), d.targetSampleRate)

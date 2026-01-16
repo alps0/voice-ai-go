@@ -252,14 +252,14 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 
 			startTs := time.Now().UnixMilli()
 			// 创建音频解码器
-			audioDecoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "pcm")
+			audioDecoder, err := util.CreateAudioDecoderWithSampleRate(ctx, pipeReader, outputChan, frameDuration, "pcm", sampleRate)
 			if err != nil {
 				log.Errorf("创建音频解码器失败: %v", err)
 				return
 			}
 
 			audioDecoder.WithFormat(beep.Format{
-				SampleRate:  beep.SampleRate(sampleRate),
+				SampleRate:  beep.SampleRate(24000),
 				NumChannels: channels,
 				Precision:   2,
 			})

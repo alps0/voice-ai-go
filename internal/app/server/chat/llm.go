@@ -454,7 +454,12 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *sc
 
 	var messageList []*schema.Message
 
-	messageList = append(messageList, userMessage, respMsg)
+	messageList = append(messageList, userMessage)
+	// 只有当respMsg有内容（Content不为空或ToolCalls不为空）时才添加到messageList
+	// 避免保存空的assistant消息导致后续LLM调用出现400错误
+	if respMsg != nil && (respMsg.Content != "" || len(respMsg.ToolCalls) > 0) {
+		messageList = append(messageList, respMsg)
+	}
 
 	addMessageFunc := func(toolCall schema.ToolCall, result string) {
 		toolResultMsg := &schema.Message{
@@ -544,6 +549,12 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *sc
 
 	if len(messageList) > 0 {
 		for _, msg := range messageList {
+			// 过滤掉Content为空的assistant消息，避免保存到历史记录中
+			// 空的assistant消息会导致后续LLM调用时出现400错误
+			if msg != nil && msg.Role == schema.Assistant && msg.Content == "" && len(msg.ToolCalls) == 0 {
+				log.Debugf("跳过保存空的assistant消息")
+				continue
+			}
 			l.AddLlmMessage(ctx, msg)
 		}
 	}
@@ -1050,7 +1061,15 @@ func (l *LLMManager) GetMessages(ctx context.Context, userMessage *schema.Messag
 		Role:    schema.System,
 		Content: systemPrompt,
 	})
-	retMessage = append(retMessage, messageList...)
+	// 过滤掉空的assistant消息，避免发送给LLM API时出现400错误
+	// 空的assistant消息（Content为空且ToolCalls为空）会导致API错误
+	for _, msg := range messageList {
+		if msg != nil && msg.Role == schema.Assistant && msg.Content == "" && len(msg.ToolCalls) == 0 {
+			log.Debugf("过滤掉空的assistant消息，避免发送给LLM API")
+			continue
+		}
+		retMessage = append(retMessage, msg)
+	}
 	if userMessage != nil {
 		retMessage = append(retMessage, userMessage)
 	}
