@@ -57,18 +57,20 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
         ```
       - 安装 ten_vad 依赖：
         ```bash
-        # 复制 ten_vad 动态库到系统库目录（Linux）
-        sudo cp lib/ten-vad/lib/Linux/x64/libten_vad.so /usr/lib/
-        # 安装 C++ 运行时依赖（如未安装）
-        sudo apt install libc++1
+        # 安装 C++ 运行时依赖（ten_vad 需要）
+        sudo apt install libc++1 libc++abi1
         ```
-      - 设置环境变量（可写入 `~/.bashrc` 或 `~/.zshrc`）：
+        > **注意**：ten_vad 库文件位于 `lib/ten-vad/lib/Linux/x64/` 目录，CGO 配置已通过 rpath 自动处理运行时库路径，无需手动复制到系统目录。
+      - 设置环境变量（可写入 `~/.bashrc` 或 `~/.zshrc`，可选）：
         ```bash
         export ONNXRUNTIME_DIR=/usr/local
-        export CGO_CFLAGS="-I${ONNXRUNTIME_DIR}/include/onnxruntime -I$(pwd)/lib/ten-vad/include"
-        export CGO_LDFLAGS="-L${ONNXRUNTIME_DIR}/lib -lonnxruntime -L$(pwd)/lib/ten-vad/lib/Linux/x64"
-        export LD_LIBRARY_PATH=/usr/lib:$(pwd)/lib/ten-vad/lib/Linux/x64:$LD_LIBRARY_PATH
+        # 如果需要在项目根目录外编译，可以设置以下环境变量（通常不需要，CGO 已自动处理）
+        # export CGO_CFLAGS="-I${ONNXRUNTIME_DIR}/include/onnxruntime"
+        # export CGO_LDFLAGS="-L${ONNXRUNTIME_DIR}/lib -lonnxruntime"
+        # 运行时库路径（如果二进制文件不在项目目录中运行，需要设置）
+        # export LD_LIBRARY_PATH=/path/to/project/lib/ten-vad/lib/Linux/x64:$LD_LIBRARY_PATH
         ```
+        > **说明**：CGO 配置已通过 `${SRCDIR}` 和 `-Wl,-rpath` 自动处理编译和运行时路径，通常无需手动设置环境变量。仅在特殊场景（如跨目录编译或部署）下才需要设置。
 
    2. **部署 FunASR 服务**
       - 参考 [FunASR 官方文档](https://github.com/modelscope/FunASR/blob/main/runtime/docs/SDK_advanced_guide_online_zh.md) 部署并启动服务。
