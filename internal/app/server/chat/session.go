@@ -171,6 +171,14 @@ func NewChatSession(clientState *ClientState, serverTransport *ServerTransport, 
 		}
 	}
 
+	// 设置 ASR 首次返回字符的回调
+	clientState.OnAsrFirstTextCallback = func(text string, isFinal bool) {
+		log.Debugf("ASR首次返回字符: device=%s, text=%s, isFinal=%v", clientState.DeviceID, text, isFinal)
+		if clientState.IsRealTime() && viper.GetInt("chat.realtime_mode") == 4 {
+			clientState.AfterAsrSessionCtx.Cancel()
+		}
+	}
+
 	return s
 }
 
@@ -319,8 +327,8 @@ func (s *ChatSession) loadFromManager() ([]*schema.Message, error) {
 
 // 在mqtt 收到type: listen, state: start后进行
 func (c *ChatSession) InitAsrLlmTts() error {
-	// 不再在这里初始化资源，改为按需获取
-	// ASR/LLM/TTS 资源在使用时从资源池获取，用完立即归还
+	//初始化asr结构
+	c.clientState.InitAsr()
 
 	// 只设置必要的配置
 	c.clientState.SetAsrPcmFrameSize(

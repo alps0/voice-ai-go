@@ -105,6 +105,9 @@ type ClientState struct {
 
 	// 异步获取声纹结果的回调函数（在 session 中设置）
 	OnVoiceSilenceSpeakerCallback func(ctx context.Context)
+
+	// ASR首次返回字符的回调函数（在 session 中设置）
+	OnAsrFirstTextCallback func(text string, isFinal bool)
 }
 
 // IsSpeakerEnabled 检查是否启用声纹识别（从全局配置中读取）
@@ -361,6 +364,13 @@ func (s *ClientState) InitAsr() error {
 		AsrAudioChannel: make(chan []float32, 100),
 		AsrEnd:          make(chan bool, 1),
 		AsrResult:       bytes.Buffer{},
+		AsrType:         asrConfig.Provider,
+		ClientState:     s, // 设置 ClientState 引用
+	}
+
+	// 设置 ASR 模式
+	if mode, ok := asrConfig.Config["mode"].(string); ok {
+		s.Asr.Mode = mode
 	}
 
 	if rawAutoEnd, ok := asrConfig.Config["auto_end"]; ok {

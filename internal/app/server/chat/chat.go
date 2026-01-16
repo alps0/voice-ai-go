@@ -122,8 +122,8 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 	}
 
 	ttsType := clientState.DeviceConfig.Tts.Provider
-	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == constants.TtsTypeXiaozhi || ttsType == constants.TtsTypeEdgeOffline {
+	//如果使用 xiaozhi 或 edge_offline tts，则固定使用24000hz, 20ms帧长
+	if ttsType == constants.TtsTypeXiaozhi /*|| ttsType == constants.TtsTypeEdgeOffline*/ {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}

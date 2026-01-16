@@ -156,11 +156,12 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 
 	// 使用发送锁保护，确保同一时间只有一个请求在使用连接
 	p.sendMutex.Lock()
-	defer p.sendMutex.Unlock()
+	// 注意：不在函数返回时释放锁，而是在 goroutine 完成时释放
 
 	// 获取连接（复用或创建）
 	conn, err := p.getConnection(ctx)
 	if err != nil {
+		p.sendMutex.Unlock() // 获取连接失败时立即释放锁
 		return nil, fmt.Errorf("获取WebSocket连接失败: %v", err)
 	}
 
@@ -178,12 +179,13 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 	clientRequest = append(clientRequest, payloadArr...)
 	clientRequest = append(clientRequest, compressedInput...)
 
-	// 发送请求
-	err = conn.WriteMessage(websocket.BinaryMessage, clientRequest)
+	// 发送请求（使用受保护的写入方法）
+	err = p.writeMessage(conn, websocket.BinaryMessage, clientRequest)
 	if err != nil {
 		// 发送失败，清空连接，下次使用时自动重连
 		log.Errorf("发送WebSocket消息失败: %v，清空连接", err)
 		p.clearConnection()
+		p.sendMutex.Unlock() // 发送失败时立即释放锁
 		return nil, fmt.Errorf("发送WebSocket消息失败: %v", err)
 	}
 
@@ -194,6 +196,7 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 
 	outputOpusChan = make(chan []byte, 1000)
 
+	// 启动解码器 goroutine
 	go func() {
 		mp3Decoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputOpusChan, frameDuration, "mp3")
 		if err != nil {
@@ -207,7 +210,14 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 			return
 		}
 	}()
+
+	// 使用 WaitGroup 等待读取 goroutine 完成
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// 启动读取 goroutine
 	go func() {
+		defer wg.Done()
 		defer func() {
 			pipeReader.Close()
 			pipeWriter.Close()
@@ -259,6 +269,13 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 			// 重置读取超时
 			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		}
+	}()
+
+	// 在后台等待 goroutine 完成并释放锁
+	go func() {
+		wg.Wait()
+		p.sendMutex.Unlock()
+		log.Debugf("doubao_ws TextToSpeechStream goroutine 完成，已释放 sendMutex")
 	}()
 
 	return outputOpusChan, nil
@@ -321,6 +338,20 @@ func (p *DoubaoWSProvider) clearConnection() {
 		p.conn = nil
 		log.Infof("WebSocket 连接已清空，等待下次重连")
 	}
+}
+
+// writeMessage 安全地向 WebSocket 连接写入消息
+func (p *DoubaoWSProvider) writeMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	// 使用读锁保护连接写入操作，防止并发写入导致数据混乱
+	p.connMutex.RLock()
+	defer p.connMutex.RUnlock()
+
+	// 检查连接是否有效
+	if conn == nil {
+		return fmt.Errorf("连接已关闭")
+	}
+
+	return conn.WriteMessage(messageType, data)
 }
 
 // 设置请求输入

@@ -187,8 +187,12 @@ func (d *AudioDecoder) Run(startTs int64) error {
 }
 
 func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
-	defer close(d.outputOpusChan)
-
+	defer func() {
+		close(d.outputOpusChan)
+		if d.pipeReader != nil {
+			d.pipeReader.Close()
+		}
+	}()
 	var sampleRate int
 	var channels int
 
@@ -305,12 +309,22 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 						if n, err := d.enc.Encode(pcmBuffer, opusBuffer); err == nil {
 							frameData := make([]byte, n)
 							copy(frameData, opusBuffer[:n])
-							d.outputOpusChan <- frameData
+							select {
+							case <-d.ctx.Done():
+								log.Debugf("wavDecoder context done, exit")
+								return nil
+							case d.outputOpusChan <- frameData:
+							}
 						}
 					} else if d.TargetAudioFormat == "pcm" {
 						// 直接输出PCM数据
 						pcmData := Int16SliceToBytes(pcmBuffer)
-						d.outputOpusChan <- pcmData
+						select {
+						case <-d.ctx.Done():
+							log.Debugf("wavDecoder context done, exit")
+							return nil
+						case d.outputOpusChan <- pcmData:
+						}
 					}
 					currentFramePos = 0
 				}
@@ -320,7 +334,12 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 }
 
 func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
-	defer close(d.outputOpusChan)
+	defer func() {
+		close(d.outputOpusChan)
+		if d.pipeReader != nil {
+			d.pipeReader.Close()
+		}
+	}()
 
 	decoder, format, err := mp3.Decode(d.pipeReader)
 	if err != nil {
@@ -564,7 +583,7 @@ func (w *writeSeekerBuffer) Write(p []byte) (n int, err error) {
 	// 获取当前缓冲区数据的副本（避免直接修改底层缓冲区）
 	data := make([]byte, w.Buffer.Len())
 	copy(data, w.Buffer.Bytes())
-	
+
 	// 如果写入会超出当前缓冲区，需要扩展
 	endPos := w.pos + int64(len(p))
 	if endPos > int64(len(data)) {
@@ -572,14 +591,14 @@ func (w *writeSeekerBuffer) Write(p []byte) (n int, err error) {
 		extra := int(endPos - int64(len(data)))
 		data = append(data, make([]byte, extra)...)
 	}
-	
+
 	// 在指定位置写入数据
 	copy(data[w.pos:], p)
-	
+
 	// 更新缓冲区
 	w.Buffer.Reset()
 	w.Buffer.Write(data)
-	
+
 	n = len(p)
 	w.pos += int64(n)
 	return n, nil

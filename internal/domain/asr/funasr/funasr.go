@@ -173,6 +173,15 @@ func isConnectionClosedError(err error) bool {
 
 // writeMessage 安全地向 WebSocket 连接写入消息
 func (f *Funasr) writeMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	// 使用读锁保护连接写入操作，防止并发写入导致数据混乱
+	f.connMutex.RLock()
+	defer f.connMutex.RUnlock()
+
+	// 检查连接是否有效
+	if conn == nil {
+		return fmt.Errorf("连接已关闭")
+	}
+
 	return conn.WriteMessage(messageType, data)
 }
 
@@ -182,11 +191,12 @@ func (f *Funasr) writeMessage(conn *websocket.Conn, messageType int, data []byte
 func (f *Funasr) StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error) {
 	// 使用发送锁保护，确保同一时间只有一个请求在使用连接
 	f.sendMutex.Lock()
-	defer f.sendMutex.Unlock()
+	// 注意：不在函数返回时释放锁，而是在 goroutine 完成时释放
 
 	// 获取连接（复用或创建）
 	conn, err := f.getConnection(ctx)
 	if err != nil {
+		f.sendMutex.Unlock() // 获取连接失败时立即释放锁
 		return nil, err
 	}
 
@@ -207,7 +217,8 @@ func (f *Funasr) StreamingRecognize(ctx context.Context, audioStream <-chan []fl
 
 	messageBytes, err := json.Marshal(firstMessage)
 	if err != nil {
-		cancelFunc() // 错误时取消 context
+		cancelFunc()
+		f.sendMutex.Unlock() // 序列化失败时立即释放锁
 		return nil, fmt.Errorf("序列化初始消息失败: %v", err)
 	}
 
@@ -216,16 +227,36 @@ func (f *Funasr) StreamingRecognize(ctx context.Context, audioStream <-chan []fl
 		// 发送失败，清空连接，下次使用时自动重连
 		log.Errorf("发送初始消息失败: %v，清空连接", err)
 		f.clearConnection()
-		cancelFunc() // 错误时取消 context
+		cancelFunc()
+		f.sendMutex.Unlock() // 发送失败时立即释放锁
 		return nil, fmt.Errorf("发送初始消息失败: %v", err)
 	}
 
 	// 创建结果通道，带缓冲避免阻塞
 	resultChan := make(chan types.StreamingResult, 20)
 
+	// 使用 WaitGroup 等待两个 goroutine 完成
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	// 启动goroutine接收和发送数据
-	go f.recvResult(subCtx, conn, resultChan)
-	go f.forwardStreamAudio(subCtx, cancelFunc, conn, audioStream)
+	// 在 goroutine 完成时释放锁
+	go func() {
+		defer wg.Done()
+		f.recvResult(subCtx, conn, resultChan)
+	}()
+
+	go func() {
+		defer wg.Done()
+		f.forwardStreamAudio(subCtx, cancelFunc, conn, audioStream)
+	}()
+
+	// 在后台等待 goroutine 完成并释放锁
+	go func() {
+		wg.Wait()
+		f.sendMutex.Unlock()
+		log.Debugf("funasr StreamingRecognize goroutine 完成，已释放 sendMutex")
+	}()
 
 	return resultChan, nil
 }
@@ -314,12 +345,12 @@ func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.Canc
 		case <-ctx.Done():
 			// 上下文取消，发送结束消息并退出
 			log.Debugf("funasr forwardStreamAudio 上下文已取消: %v", ctx.Err())
-			cancelFunc() // 确保结束时取消上下文，通知接收goroutine
+			// 注意：这里不需要调用 cancelFunc()，因为 ctx.Done() 已经被触发说明上下文已取消
 			sendEndMsg()
 			return
 		case pcmChunk, ok := <-audioStream:
 			if !ok {
-				// 通道已关闭，结束输入
+				// 通道已关闭，结束输入，需要通知接收goroutine停止
 				sendEndMsg()
 				return
 			}
@@ -334,6 +365,7 @@ func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.Canc
 			if err != nil {
 				log.Debugf("funasr forwardStreamAudio 发送音频数据失败: %v，清空连接", err)
 				f.clearConnection()
+				cancelFunc() // 发送失败时取消上下文，通知 recvResult goroutine 停止
 				return
 			}
 		}

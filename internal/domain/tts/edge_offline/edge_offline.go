@@ -97,26 +97,42 @@ func (p *EdgeOfflineTTSProvider) clearConnection() {
 	}
 }
 
+// writeMessage 安全地向 WebSocket 连接写入消息
+func (p *EdgeOfflineTTSProvider) writeMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	// 使用读锁保护连接写入操作，防止并发写入导致数据混乱
+	p.connMutex.RLock()
+	defer p.connMutex.RUnlock()
+
+	// 检查连接是否有效
+	if conn == nil {
+		return fmt.Errorf("连接已关闭")
+	}
+
+	return conn.WriteMessage(messageType, data)
+}
+
 // TextToSpeech 将文本转换为语音，返回音频帧数据
 func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, sampleRate int, channels int, frameDuration int) ([][]byte, error) {
 	var frames [][]byte
 
 	// 使用发送锁保护，确保同一时间只有一个请求在使用连接
 	p.sendMutex.Lock()
-	defer p.sendMutex.Unlock()
+	// 注意：不在函数返回时释放锁，而是在 goroutine 完成时释放
 
 	// 获取连接（复用或创建）
 	conn, err := p.getConnection(ctx)
 	if err != nil {
+		p.sendMutex.Unlock() // 获取连接失败时立即释放锁
 		return nil, err
 	}
 
-	// 发送文本
-	err = conn.WriteMessage(websocket.TextMessage, []byte(text))
+	// 发送文本（使用受保护的写入方法）
+	err = p.writeMessage(conn, websocket.TextMessage, []byte(text))
 	if err != nil {
 		// 发送失败，清空连接，下次使用时自动重连
 		log.Errorf("发送文本失败: %v，清空连接", err)
 		p.clearConnection()
+		p.sendMutex.Unlock() // 发送失败时立即释放锁
 		return nil, fmt.Errorf("发送文本失败: %v", err)
 	}
 
@@ -129,6 +145,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 	audioDecoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
 	if err != nil {
 		pipeReader.Close()
+		p.sendMutex.Unlock() // 创建解码器失败时立即释放锁
 		return nil, fmt.Errorf("创建音频解码器失败: %v", err)
 	}
 
@@ -139,9 +156,14 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 		}
 	}()
 
+	// 使用 WaitGroup 等待读取 goroutine 完成
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	// 接收WebSocket数据并写入管道
 	done := make(chan struct{})
 	go func() {
+		defer wg.Done()
 		defer close(done)
 		defer pipeWriter.Close()
 
@@ -173,6 +195,13 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 		}
 	}()
 
+	// 在后台等待 goroutine 完成并释放锁
+	go func() {
+		wg.Wait()
+		p.sendMutex.Unlock()
+		log.Debugf("edge_offline TextToSpeech goroutine 完成，已释放 sendMutex")
+	}()
+
 	// 等待完成或超时
 	select {
 	case <-ctx.Done():
@@ -186,10 +215,6 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 // TextToSpeechStream 流式语音合成
 func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text string, sampleRate int, channels int, frameDuration int) (chan []byte, error) {
 	outputChan := make(chan []byte, 100)
-	var closeOnce sync.Once
-	closeChan := func() {
-		close(outputChan)
-	}
 
 	go func() {
 		// 使用发送锁保护，确保同一时间只有一个请求在使用连接
@@ -200,27 +225,25 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 		if err != nil {
 			p.sendMutex.Unlock()
 			log.Errorf("获取WebSocket连接失败: %v", err)
-			closeOnce.Do(closeChan)
 			return
 		}
 
-		// 发送文本
-		err = conn.WriteMessage(websocket.TextMessage, []byte(text))
+		// 发送文本（使用受保护的写入方法）
+		err = p.writeMessage(conn, websocket.TextMessage, []byte(text))
 		if err != nil {
 			p.sendMutex.Unlock()
 			log.Errorf("发送文本失败: %v，清空连接", err)
 			// 发送失败，清空连接，下次使用时自动重连
 			p.clearConnection()
-			closeOnce.Do(closeChan)
 			return
 		}
 
 		// 创建管道用于音频数据传输
 		pipeReader, pipeWriter := io.Pipe()
 		defer func() {
-			pipeReader.Close()
 			pipeWriter.Close()
 			// 读取完成后释放锁
+			log.Debugf("TextToSpeechStream read completed, release sendMutex")
 			p.sendMutex.Unlock()
 		}()
 
@@ -232,7 +255,6 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 			audioDecoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "pcm")
 			if err != nil {
 				log.Errorf("创建音频解码器失败: %v", err)
-				closeOnce.Do(closeChan)
 				return
 			}
 
@@ -254,7 +276,6 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 			case <-ctx.Done():
 				log.Debugf("TextToSpeechStream context done, exit")
 				// 关闭 pipeWriter，让解码器自然结束并关闭 channel
-				pipeWriter.Close()
 				return
 			default:
 				messageType, data, err := conn.ReadMessage()
@@ -273,7 +294,6 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 				if messageType == websocket.BinaryMessage {
 					if _, err := pipeWriter.Write(data); err != nil {
 						log.Errorf("写入音频数据失败: %v", err)
-						pipeWriter.Close()
 						return
 					}
 					return
