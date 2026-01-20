@@ -717,7 +717,7 @@ const groupDialogMode = ref('add') // 'add' | 'edit'
 const currentGroup = ref(null)
 const showSampleDrawer = ref(false)
 const showUploadDialog = ref(false)
-const uploadMode = ref('upload') // 'upload' | 'record' | 'history'
+const uploadMode = ref('history') // 'upload' | 'record' | 'history'
 
 // 验证对话框相关
 const showVerifyDialog = ref(false)
@@ -1470,7 +1470,7 @@ const handleCloseSampleDrawer = () => {
 // 添加样本
 const handleAddSample = async () => {
   resetUploadForm()
-  uploadMode.value = 'upload'
+  uploadMode.value = 'history'
   showUploadDialog.value = true
   
   // 初始化历史记录表单
@@ -2013,7 +2013,7 @@ const resetUploadForm = () => {
   }
   recordedBlob.value = null
   recordTime.value = 0
-  uploadMode.value = 'upload'
+  uploadMode.value = 'history'
   
   // 清理历史记录相关
   historyForm.agent_id = null

@@ -441,6 +441,7 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 			log.Debugf("处理asr结果: %s, 耗时: %d ms", text, state.GetAsrDuration())
 
 			if text != "" {
+
 				// 创建用户消息
 				userMsg := &schema.Message{
 					Role:    schema.User,

@@ -175,6 +175,11 @@ func (c *ChatManager) GetDeviceId() string {
 	return c.clientState.DeviceID
 }
 
+// GetSession 获取 ChatSession
+func (c *ChatManager) GetSession() *ChatSession {
+	return c.session
+}
+
 // InjectMessage 注入消息到设备
 func (c *ChatManager) InjectMessage(message string, skipLlm bool) error {
 	if skipLlm {

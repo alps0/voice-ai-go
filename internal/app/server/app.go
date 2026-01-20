@@ -78,7 +78,7 @@ func (a *App) Run() {
 }
 
 func (app *App) initEventHandle() {
-	eventHandle, err := NewEventHandle()
+	eventHandle, err := NewEventHandle(app)
 	if err != nil {
 		log.Errorf("初始化 EventHandle 失败: %v", err)
 		return
@@ -88,15 +88,15 @@ func (app *App) initEventHandle() {
 		return
 	}
 
-	// 初始化聊天历史记录处理器（总是启用）
+	// 初始化消息处理器（总是启用，统一处理Redis+MemoryProvider+History）
 	historyCfg := history.HistoryClientConfig{
 		BaseURL:   util.GetBackendURL(),
 		AuthToken: viper.GetString("manager.history_auth_token"),
 		Timeout:   viper.GetDuration("manager.history_timeout"),
 		Enabled:   true, // 总是启用
 	}
-	NewHistoryWorker(historyCfg)
-	log.Info("聊天历史记录处理器已初始化")
+	NewMessageWorker(historyCfg)
+	log.Info("消息处理器已初始化")
 }
 
 func (app *App) newMqttUdpAdapter() (*mqtt_udp.MqttUdpAdapter, error) {

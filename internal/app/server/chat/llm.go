@@ -40,7 +40,8 @@ const (
 type contextKey int
 
 const (
-	fullTextKey contextKey = iota
+	ttsStopDelayDuration time.Duration = 200 * time.Millisecond
+	fullTextKey          contextKey    = iota
 )
 
 // GetLastMessageID 获取最近保存的消息的 MessageID（用于两阶段保存）
@@ -179,6 +180,7 @@ func (l *LLMManager) HandleLLMResponseChannelAsync(ctx context.Context, userMess
 		onEndFunc = func(err error, args ...any) {
 			//非realtime模式下, 发送TTS停止命令
 			if !l.clientState.IsRealTime() {
+				time.Sleep(ttsStopDelayDuration)
 				l.serverTransport.SendTtsStop()
 			}
 
@@ -273,6 +275,8 @@ func (l *LLMManager) HandleLLMResponseChannelSync(ctx context.Context, userMessa
 
 	if needSendTtsCmd {
 		if !l.clientState.IsRealTime() {
+			//加个
+			time.Sleep(ttsStopDelayDuration)
 			l.serverTransport.SendTtsStop()
 		}
 
@@ -470,6 +474,8 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *sc
 		messageList = append(messageList, toolResultMsg)
 	}
 
+	var findExitTool bool
+
 	for _, toolCall := range tools {
 		toolName := toolCall.Function.Name
 		tool, ok := mcp.GetToolByName(state.DeviceID, toolName)
@@ -497,6 +503,11 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *sc
 		var result string = fcResult
 		var contentList []mcp_go.Content
 		if mcpResp, ok := l.handleLocalToolResult(fcResult); ok {
+			if mcpResp.GetType() == MCPResponseTypeAction {
+				if mcpResp.GetAction() == "exit_conversation" {
+					findExitTool = true
+				}
+			}
 			/*if mcpResp.IsTerminal() {
 				log.Infof("工具调用结果: %s, 终止: %t", fcResult, mcpResp.IsTerminal())
 				return invokeToolSuccess, nil
@@ -560,6 +571,19 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *sc
 	}
 
 	wg.Wait()
+
+	if findExitTool {
+		// 发布退出聊天事件
+		eventbus.Get().Publish(eventbus.TopicExitChat, &eventbus.ExitChatEvent{
+			ClientState: l.clientState,
+			Reason:      "工具调用退出",
+			TriggerType: "tool_call",
+			UserText:    "",
+			Timestamp:   time.Now(),
+		})
+
+		return invokeToolSuccess, nil
+	}
 
 	// 如果工具调用成功且没有被标记为停止处理，则继续LLM调用
 	if invokeToolSuccess && !shouldStopLLMProcessing {
@@ -1071,7 +1095,19 @@ func (l *LLMManager) GetMessages(ctx context.Context, userMessage *schema.Messag
 		retMessage = append(retMessage, msg)
 	}
 	if userMessage != nil {
-		retMessage = append(retMessage, userMessage)
+		// 检查 retMessage 的最后一条消息是否已经是相同的用户消息，避免重复添加
+		shouldAdd := true
+		if len(retMessage) > 0 {
+			lastMsg := retMessage[len(retMessage)-1]
+			if lastMsg.Role == schema.User && lastMsg.Content == userMessage.Content {
+				// 最后一条消息已经是相同的用户消息，跳过添加
+				shouldAdd = false
+				//log.Debugf("最后一条消息已经是相同的用户消息，跳过重复添加: %s", userMessage.Content)
+			}
+		}
+		if shouldAdd {
+			retMessage = append(retMessage, userMessage)
+		}
 	}
 	return retMessage
 }

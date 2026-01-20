@@ -309,7 +309,7 @@ func (s *ChatSession) loadFromManager() ([]*schema.Message, error) {
 		case "user":
 			msg = schema.UserMessage(item.Content)
 		case "assistant":
-			msg = schema.AssistantMessage(item.Content, nil)
+			msg = schema.AssistantMessage(item.Content, item.ToolCalls)
 		case "tool":
 			msg = schema.ToolMessage(item.Content, item.ToolCallID)
 		case "system":
@@ -320,6 +320,10 @@ func (s *ChatSession) loadFromManager() ([]*schema.Message, error) {
 		}
 
 		messages = append(messages, msg)
+	}
+
+	for _, msg := range messages {
+		log.Debugf("历史消息: %+v", msg)
 	}
 
 	return messages, nil
@@ -633,6 +637,16 @@ func (s *ChatSession) HandleWelcome() {
 	s.clientState.IsWelcomeSpeaking = true
 }
 
+func (a *ChatSession) checkExitWords(text string) bool {
+	exitWords := []string{"再见", "退下吧", "退出", "退出对话"}
+	for _, word := range exitWords {
+		if strings.Contains(text, word) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *ChatSession) GetRandomGreeting() string {
 	greetingList := viper.GetStringSlice("greeting_list")
 	if len(greetingList) == 0 {
@@ -860,6 +874,41 @@ func (s *ChatSession) ClearChatTextQueue() {
 	s.chatTextQueue.Clear()
 }
 
+// DoExitChat 执行退出聊天逻辑（发送再见语并关闭会话）
+func (s *ChatSession) DoExitChat() {
+	// 友好的再见语
+	goodbyeText := "好的，再见！期待下次与您聊天～"
+
+	// 保存一条 assistant 角色的消息
+	goodbyeMsg := schema.AssistantMessage(goodbyeText, nil)
+	if err := s.llmManager.AddLlmMessage(s.clientState.Ctx, goodbyeMsg); err != nil {
+		log.Errorf("保存再见消息失败: %v", err)
+	}
+
+	// 获取 context
+	sessionCtx := s.clientState.SessionCtx.Get(s.clientState.Ctx)
+	ctx := s.clientState.AfterAsrSessionCtx.Get(sessionCtx)
+
+	// 发送 TTS 再见语
+	s.serverTransport.SendTtsStart()
+
+	err := s.ttsManager.handleTextResponse(ctx, llm_common.LLMResponseStruct{
+		Text:    goodbyeText,
+		IsStart: true,
+		IsEnd:   true,
+	}, true) // 同步处理，等待TTS完成
+
+	if err != nil {
+		log.Errorf("发送再见语失败: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond) // ttsStopDelayDuration
+
+	s.serverTransport.SendTtsStop()
+	// 关闭会话
+	s.Close()
+}
+
 func (s *ChatSession) Close() {
 	// 清理ASR资源（资源管理在 ASRManager 内部）
 	if s.asrManager != nil {
@@ -904,14 +953,16 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string, speakerResu
 	default:
 	}
 
-	//当收到停止说话或退出说话时, 则退出对话
-	clearText := strings.TrimSpace(text)
-	exitWords := []string{"再见", "退下吧", "退出", "退出对话", "停止", "停止说话"}
-	for _, word := range exitWords {
-		if strings.Contains(clearText, word) {
-			s.Close()
-			return nil
-		}
+	if s.checkExitWords(text) {
+		// 发布退出聊天事件
+		eventbus.Get().Publish(eventbus.TopicExitChat, &eventbus.ExitChatEvent{
+			ClientState: s.clientState,
+			Reason:      "用户主动退出",
+			TriggerType: "exit_words",
+			UserText:    text,
+			Timestamp:   time.Now(),
+		})
+		return nil
 	}
 
 	clientState := s.clientState

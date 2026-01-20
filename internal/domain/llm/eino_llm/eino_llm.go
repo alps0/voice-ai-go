@@ -286,7 +286,7 @@ func (p *EinoLLMProvider) EinoResponseWithTools(ctx context.Context, sessionID s
 				// 处理流式响应
 				for {
 					message, err := streamReader.Recv()
-					log.Debugf("streamReader.Recv() message: %+v", message)
+					//log.Debugf("streamReader.Recv() message: %+v", message)
 					if err == io.EOF {
 						// 如果有未完成的工具调用，发送最后一次
 						if currentToolCall != nil {

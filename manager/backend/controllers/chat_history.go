@@ -509,12 +509,12 @@ func (c *ChatHistoryController) GetMessagesForInit(ctx *gin.Context) {
 			"content":    msg.Content,
 			"created_at": msg.CreatedAt.Format(time.RFC3339),
 		}
-		// Tool 角色：从独立字段读取 ToolCallID
-		if msg.Role == "tool" && msg.ToolCallID != "" {
+		// 直接返回 tool_call_id（如果存在）
+		if msg.ToolCallID != "" {
 			item["tool_call_id"] = msg.ToolCallID
 		}
-		// Assistant 角色：如果有 ToolCalls，反序列化并返回
-		if msg.Role == "assistant" && msg.ToolCallsJSON != nil && *msg.ToolCallsJSON != "" {
+		// 直接返回 tool_calls（如果存在）
+		if msg.ToolCallsJSON != nil && *msg.ToolCallsJSON != "" {
 			var toolCalls []interface{}
 			if err := json.Unmarshal([]byte(*msg.ToolCallsJSON), &toolCalls); err == nil {
 				item["tool_calls"] = toolCalls

@@ -5,25 +5,51 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"hash/fnv"
+	"runtime"
 	"sync"
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/data/history"
 	"xiaozhi-esp32-server-golang/internal/domain/eventbus"
+	"xiaozhi-esp32-server-golang/internal/domain/memory/llm_memory"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/spf13/viper"
 )
 
-const (
-	// workerNum 固定worker数量，必须是2的幂次以便hash分布
-	workerNum = 16
+var (
+	// MessageWorkerNum 消息处理worker数量（基于CPU核心数，统一配置，用于Redis+History处理）
+	// 必须是2的幂次以便hash分布
+	MessageWorkerNum = getMessageWorkerNum()
 )
 
-// HistoryWorker 聊天历史记录处理器
+// getMessageWorkerNum 根据CPU核心数计算worker数量，向上取到最近的2的幂次
+// 最小值为4，最大值为64
+func getMessageWorkerNum() int {
+	cpuNum := runtime.NumCPU()
+
+	// 最小值为4，最大值为64
+	if cpuNum < 4 {
+		return 4
+	}
+	if cpuNum > 64 {
+		return 64
+	}
+
+	// 向上取到最近的2的幂次
+	power := 1
+	for power < cpuNum {
+		power <<= 1
+	}
+	return power
+}
+
+// MessageWorker 消息处理器
 // 使用固定数量的goroutine池，按SessionID的hash值路由，保证同一会话的消息顺序处理
-type HistoryWorker struct {
+// 统一处理Redis、MemoryProvider和History消息
+type MessageWorker struct {
 	client  *history.HistoryClient
 	workers []chan *eventbus.AddMessageEvent // 每个worker的channel
 	ctx     context.Context
@@ -31,34 +57,34 @@ type HistoryWorker struct {
 	wg      sync.WaitGroup
 }
 
-// NewHistoryWorker 创建历史记录处理器
-func NewHistoryWorker(cfg history.HistoryClientConfig) *HistoryWorker {
+// NewMessageWorker 创建消息处理器
+func NewMessageWorker(cfg history.HistoryClientConfig) *MessageWorker {
 	client := history.NewHistoryClient(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	worker := &HistoryWorker{
+	worker := &MessageWorker{
 		client:  client,
-		workers: make([]chan *eventbus.AddMessageEvent, workerNum),
+		workers: make([]chan *eventbus.AddMessageEvent, MessageWorkerNum),
 		ctx:     ctx,
 		cancel:  cancel,
 	}
 
 	// 初始化每个worker的channel并启动goroutine
-	for i := 0; i < workerNum; i++ {
+	for i := 0; i < MessageWorkerNum; i++ {
 		worker.workers[i] = make(chan *eventbus.AddMessageEvent, 100) // 缓冲100个消息
 		worker.wg.Add(1)
 		go worker.workerLoop(i)
 	}
 
 	worker.subscribeEvents()
-	log.Infof("HistoryWorker初始化完成，启动 %d 个worker goroutine", workerNum)
+	log.Infof("MessageWorker初始化完成，启动 %d 个worker goroutine（统一处理Redis+MemoryProvider+History）", MessageWorkerNum)
 	return worker
 }
 
 // workerLoop 每个worker的处理循环（保证顺序处理）
-func (w *HistoryWorker) workerLoop(index int) {
+func (w *MessageWorker) workerLoop(index int) {
 	defer w.wg.Done()
-	defer log.Infof("HistoryWorker worker %d 退出", index)
+	defer log.Infof("MessageWorker worker %d 退出", index)
 
 	ch := w.workers[index]
 	for {
@@ -88,8 +114,11 @@ func (w *HistoryWorker) workerLoop(index int) {
 }
 
 // processMessage 处理消息（在worker goroutine中顺序执行）
-func (w *HistoryWorker) processMessage(event *eventbus.AddMessageEvent) {
-	ctx, cancel := context.WithTimeout(event.ClientState.Ctx, 5*time.Second)
+// 统一处理Redis、MemoryProvider和History，保证同一设备/会话的消息顺序处理
+func (w *MessageWorker) processMessage(event *eventbus.AddMessageEvent) {
+	// 1. 处理 History（所有消息）
+	// 使用独立的 context，不受 event.ClientState.Ctx 影响，确保历史消息保存不受对话取消影响
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// 判断是新增还是更新
@@ -97,13 +126,36 @@ func (w *HistoryWorker) processMessage(event *eventbus.AddMessageEvent) {
 		// 第二阶段：更新音频
 		w.updateMessageAudio(ctx, event)
 	} else {
-		// 第一阶段：保存文本消息
+		// 第一阶段：保存文本消息（包含Redis处理）
 		w.saveMessageText(ctx, event)
+	}
+
+	// 2. 处理 MemoryProvider（仅!IsUpdate时，独立于redis和manager）
+	// 长期记忆体（memobase/mem0）处理，不管是redis还是manager场景都需要
+	if !event.IsUpdate {
+		w.processMemoryProvider(event)
+	}
+}
+
+// processMemoryProvider 处理长期记忆体（memobase/mem0）
+// 独立于redis和manager，不管是redis还是manager场景都需要处理
+func (w *MessageWorker) processMemoryProvider(event *eventbus.AddMessageEvent) {
+	clientState := event.ClientState
+	if clientState.MemoryProvider == nil {
+		return
+	}
+
+	err := clientState.MemoryProvider.AddMessage(
+		clientState.Ctx,
+		clientState.GetDeviceIDOrAgentID(),
+		event.Msg)
+	if err != nil {
+		log.Errorf("add message to memory provider failed: %v", err)
 	}
 }
 
 // hashSessionID 计算SessionID的hash值，返回worker索引
-func (w *HistoryWorker) hashSessionID(sessionID string) int {
+func (w *MessageWorker) hashSessionID(sessionID string) int {
 	if sessionID == "" {
 		return 0 // 如果SessionID为空，使用第一个worker
 	}
@@ -112,18 +164,18 @@ func (w *HistoryWorker) hashSessionID(sessionID string) int {
 	h := fnv.New32a()
 	h.Write([]byte(sessionID))
 	hash := h.Sum32()
-	return int(hash) % workerNum
+	return int(hash) % MessageWorkerNum
 }
 
 // subscribeEvents 订阅EventBus事件
-func (w *HistoryWorker) subscribeEvents() {
+func (w *MessageWorker) subscribeEvents() {
 	bus := eventbus.Get()
 	// 订阅统一的消息添加事件（与 EventHandle 监听同一个 Topic）
 	bus.Subscribe(eventbus.TopicAddMessage, w.handleAddMessage)
 }
 
 // handleAddMessage 统一处理消息添加事件（路由到对应的worker）
-func (w *HistoryWorker) handleAddMessage(event *eventbus.AddMessageEvent) {
+func (w *MessageWorker) handleAddMessage(event *eventbus.AddMessageEvent) {
 	if event == nil || event.ClientState == nil {
 		return
 	}
@@ -153,7 +205,21 @@ func (w *HistoryWorker) handleAddMessage(event *eventbus.AddMessageEvent) {
 }
 
 // saveMessageText 保存文本消息（第一阶段，或一次性保存文本+音频）
-func (w *HistoryWorker) saveMessageText(ctx context.Context, event *eventbus.AddMessageEvent) {
+// 包含Redis处理（当config_provider.type为redis时）
+func (w *MessageWorker) saveMessageText(ctx context.Context, event *eventbus.AddMessageEvent) {
+	// 处理 Redis（仅当config_provider.type为redis时）
+	// 添加到 Redis 消息列表（用于 LLM 上下文）
+	providerType := viper.GetString("config_provider.type")
+	if providerType == "redis" {
+		clientState := event.ClientState
+		llm_memory.Get().AddMessage(
+			clientState.Ctx,
+			clientState.DeviceID,
+			clientState.AgentID,
+			event.Msg)
+		return
+	}
+
 	// 确定消息角色
 	var role history.MessageType
 	switch event.Msg.Role {
@@ -264,7 +330,7 @@ func (w *HistoryWorker) saveMessageText(ctx context.Context, event *eventbus.Add
 }
 
 // updateMessageAudio 更新消息音频（第二阶段）
-func (w *HistoryWorker) updateMessageAudio(ctx context.Context, event *eventbus.AddMessageEvent) {
+func (w *MessageWorker) updateMessageAudio(ctx context.Context, event *eventbus.AddMessageEvent) {
 	// 转换音频格式
 	var audioBase64 string
 	var audioSize int
