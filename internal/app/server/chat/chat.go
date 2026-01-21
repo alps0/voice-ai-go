@@ -110,7 +110,6 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		AsrAudioBuffer: &AsrAudioBuffer{
 			PcmData:          make([]float32, 0),
 			AudioBufferMutex: sync.RWMutex{},
-			PcmFrameSize:     0,
 		},
 		VoiceStatus: VoiceStatus{
 			HaveVoice:            false,
@@ -122,8 +121,8 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 	}
 
 	ttsType := clientState.DeviceConfig.Tts.Provider
-	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == constants.TtsTypeXiaozhi || ttsType == constants.TtsTypeEdgeOffline {
+	//如果使用 xiaozhi 或 edge_offline tts，则固定使用24000hz, 20ms帧长
+	if ttsType == constants.TtsTypeXiaozhi /*|| ttsType == constants.TtsTypeEdgeOffline*/ {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
@@ -174,6 +173,11 @@ func (c *ChatManager) GetClientState() *ClientState {
 
 func (c *ChatManager) GetDeviceId() string {
 	return c.clientState.DeviceID
+}
+
+// GetSession 获取 ChatSession
+func (c *ChatManager) GetSession() *ChatSession {
+	return c.session
 }
 
 // InjectMessage 注入消息到设备

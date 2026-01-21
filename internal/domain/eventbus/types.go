@@ -3,6 +3,7 @@ package eventbus
 const (
 	TopicAddMessage = "add_message"
 	TopicSessionEnd = "session_end"
+	TopicExitChat   = "exit_chat" // 退出聊天事件
 
 	// 聊天历史相关事件（已废弃，统一使用 TopicAddMessage）
 	// Deprecated: 使用 TopicAddMessage 替代

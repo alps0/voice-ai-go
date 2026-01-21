@@ -1,5 +1,6 @@
 <template>
-  <el-container class="layout-container">
+  <!-- 桌面端布局：使用Element Plus -->
+  <el-container v-if="!isMobileDevice" class="layout-container">
     <el-aside width="250px" class="sidebar">
       <div class="logo">
         <h3>小智管理系统</h3>
@@ -60,6 +61,12 @@
           <el-menu-item index="/admin/memory-config">Memory配置</el-menu-item>
         </el-sub-menu>
         
+        <!-- 系统监控 -->
+        <el-menu-item v-if="authStore.isAdmin" index="/admin/pool-stats">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>资源池统计</span>
+        </el-menu-item>
+        
         <!-- 系统管理 -->
         <el-menu-item v-if="authStore.isAdmin" index="/admin/global-roles">
           <el-icon><Setting /></el-icon>
@@ -109,6 +116,9 @@
       </el-main>
     </el-container>
   </el-container>
+  
+  <!-- 移动端布局：使用Vant组件 -->
+  <MobileLayout v-else />
 </template>
 
 <script setup>
@@ -116,6 +126,8 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
+import { isMobile } from '../utils/device'
+import MobileLayout from './MobileLayout.vue'
 import {
   House,
   Monitor,
@@ -127,12 +139,16 @@ import {
   UserFilled,
   Iphone,
   Connection,
-  Microphone
+  Microphone,
+  DataAnalysis
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+
+// 设备检测
+const isMobileDevice = computed(() => isMobile())
 
 const currentPageTitle = computed(() => {
   return route.meta?.title || '仪表板'

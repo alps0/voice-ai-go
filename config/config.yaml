@@ -13,7 +13,7 @@ auth:
 chat:
   max_idle_duration: 30000         # 最大空闲时间（毫秒）
   chat_max_silence_duration: 200   # 由 有声音 转到 静音的阈值时间，决定响应快慢 （毫秒）
-  realtime_mode: 1 # 1: vad打断模式 2: asr打断模式
+  realtime_mode: 4 # 1: vad打断模式 2: asr打断模式 3: asr时识别到声纹时进行打断 4. asr出结果打断(兼容流式或离线)
 
 config_provider:          #对应domain/config/中的provider
   type: "manager"         #现在可以是 manager, redis
@@ -85,9 +85,19 @@ udp:
   listen_host: "0.0.0.0"      # 监听地址
   listen_port: 8990           # 监听端口
 
+# 资源池配置（所有资源类型共享默认配置）
+resource_pools:
+  max_size: 1000              # 最大资源数量
+  min_size: 1               # 最小资源数量（预创建）
+  max_idle: 50              # 最大空闲资源数量
+  acquire_timeout: 5s       # 获取资源超时时间
+  idle_timeout: 10m         # 资源空闲超时时间
+  validate_on_borrow: true  # 获取时是否验证资源
+  validate_on_return: true  # 归还时是否验证资源
+
 # 语音活动检测（VAD）配置
 vad:
-  provider: "webrtc_vad"  # VAD提供商：webrtc_vad、silero_vad 或 ten_vad
+  provider: "ten_vad"  # VAD提供商：webrtc_vad、silero_vad 或 ten_vad
   # WebRTC VAD配置
   webrtc_vad:
     pool_min_size: 5        # 连接池最小大小
@@ -107,7 +117,7 @@ vad:
   # TEN-VAD配置
   ten_vad:
     hop_size: 512                     # 帧移大小
-    threshold: 0.3                    # VAD检测阈值
+    threshold: 0.4                    # VAD检测阈值
     pool_size: 10                     # 资源池大小
     acquire_timeout_ms: 3000          # 获取超时时间（毫秒）
 
@@ -344,4 +354,4 @@ wakeup_words:
 voice_identify:
   enable: true
   base_url: "http://192.168.208.214:8080"
-  threshold: 0.6  # 声纹识别阈值，范围 0.0-1.0，默认 0.6
+  threshold: 0.4  # 声纹识别阈值，范围 0.0-1.0，默认 0.6

@@ -1,5 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { isMobile } from '../utils/device'
+
+// 根据设备类型动态加载组件
+const getLoginComponent = () => {
+  return isMobile()
+    ? import('../views/mobile/MobileLogin.vue')
+    : import('../views/Login.vue')
+}
 
 const routes = [
   {
@@ -25,7 +33,7 @@ const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: () => import('../views/Login.vue')
+    component: getLoginComponent
   },
   {
     path: '/',
@@ -112,12 +120,18 @@ const routes = [
             component: () => import('../views/admin/MemoryConfig.vue'),
             meta: { title: 'Memory配置管理' }
           },
-          		{
-			path: 'vision-config',
-			name: 'VisionConfig',
-			component: () => import('../views/admin/VisionConfig.vue'),
-			meta: { title: 'Vision配置管理' }
-		},
+          {
+            path: 'vision-config',
+            name: 'VisionConfig',
+            component: () => import('../views/admin/VisionConfig.vue'),
+            meta: { title: 'Vision配置管理' }
+          },
+          {
+            path: 'pool-stats',
+            name: 'PoolStats',
+            component: () => import('../views/admin/PoolStats.vue'),
+            meta: { title: '资源池统计' }
+          },
           {
             path: 'global-roles',
             name: 'GlobalRoles',

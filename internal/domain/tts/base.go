@@ -22,10 +22,21 @@ type BaseTTSProvider interface {
 // 完整TTS提供者接口（包含Context方法）
 type TTSProvider interface {
 	BaseTTSProvider
+	// SetVoice 动态设置音色参数
+	// voiceConfig: 包含音色相关配置的 map，如 {"voice": "xxx"} 或 {"spk_id": "xxx"}
+	SetVoice(voiceConfig map[string]interface{}) error
+	// Close 关闭资源，释放连接等
+	Close() error
+	// IsValid 检查资源是否有效（连接是否存活等）
+	IsValid() bool
 }
 
 // GetTTSProvider 获取一个完整的TTS提供者（支持Context）
 func GetTTSProvider(providerName string, config map[string]interface{}) (TTSProvider, error) {
+	// 优先使用 config 中的 provider，否则使用参数中的 provider
+	if configProvider, ok := config["provider"].(string); ok && configProvider != "" {
+		providerName = configProvider
+	}
 	var baseProvider BaseTTSProvider
 
 	switch providerName {
@@ -70,6 +81,18 @@ func (a *ContextTTSAdapter) TextToSpeech(ctx context.Context, text string, sampl
 // TextToSpeechStream 代理到原始提供者
 func (a *ContextTTSAdapter) TextToSpeechStream(ctx context.Context, text string, sampleRate int, channels int, frameDuration int) (outputChan chan []byte, err error) {
 	return a.Provider.TextToSpeechStream(ctx, text, sampleRate, channels, frameDuration)
+}
+
+// SetVoice 代理到底层 Provider 的 SetVoice 方法
+func (a *ContextTTSAdapter) SetVoice(voiceConfig map[string]interface{}) error {
+	// 如果底层 Provider 实现了 SetVoice 方法，直接调用
+	if setter, ok := a.Provider.(interface {
+		SetVoice(map[string]interface{}) error
+	}); ok {
+		return setter.SetVoice(voiceConfig)
+	}
+	// 否则返回不支持的错误
+	return fmt.Errorf("底层 Provider 不支持 SetVoice 方法")
 }
 
 // TextToSpeechWithContext 使用Context版本的文本转语音
@@ -158,4 +181,27 @@ func (a *ContextTTSAdapter) TextToSpeechStreamWithContext(ctx context.Context, t
 	}()
 
 	return outputChan, cancelFunc, nil
+}
+
+// Close 关闭资源
+func (a *ContextTTSAdapter) Close() error {
+	// 如果底层 Provider 实现了 Close 方法，直接调用
+	if closer, ok := a.Provider.(interface {
+		Close() error
+	}); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+// IsValid 检查资源是否有效
+func (a *ContextTTSAdapter) IsValid() bool {
+	// 如果底层 Provider 实现了 IsValid 方法，直接调用
+	if validator, ok := a.Provider.(interface {
+		IsValid() bool
+	}); ok {
+		return validator.IsValid()
+	}
+	// 否则检查 Provider 是否为 nil
+	return a.Provider != nil
 }
