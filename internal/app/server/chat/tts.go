@@ -15,7 +15,8 @@ import (
 
 type TTSQueueItem struct {
 	ctx         context.Context
-	llmResponse llm_common.LLMResponseStruct
+	llmResponse llm_common.LLMResponseStruct   // 单条模式使用
+	StreamChan  <-chan llm_common.LLMResponseStruct // 流式模式：非 nil 时优先从此 channel 读
 	onStartFunc func()
 	onEndFunc   func(err error)
 }
@@ -64,17 +65,21 @@ func (t *TTSManager) processTTSQueue(ctx context.Context) {
 			continue
 		}
 
-		log.Debugf("processTTSQueue start, text: %s", item.llmResponse.Text)
-
 		if item.onStartFunc != nil {
 			item.onStartFunc()
 		}
-		err = t.handleTts(item.ctx, item.llmResponse)
+		if item.StreamChan != nil {
+			log.Debugf("processTTSQueue start, stream mode")
+			err = t.handleStreamTts(item)
+			log.Debugf("processTTSQueue end, stream mode")
+		} else {
+			log.Debugf("processTTSQueue start, text: %s", item.llmResponse.Text)
+			err = t.handleTts(item.ctx, item.llmResponse)
+			log.Debugf("processTTSQueue end, text: %s", item.llmResponse.Text)
+		}
 		if item.onEndFunc != nil {
 			item.onEndFunc(err)
 		}
-		log.Debugf("processTTSQueue end, text: %s", item.llmResponse.Text)
-
 	}
 }
 
@@ -227,6 +232,23 @@ func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMRe
 	}
 
 	return nil
+}
+
+// handleStreamTts 流式 TTS：从 item.StreamChan 持续读取 LLMResponseStruct，逐条调用 handleTts，直到 Channel 关闭或出错（onStartFunc/onEndFunc 由 processTTSQueue 统一调用）
+func (t *TTSManager) handleStreamTts(item TTSQueueItem) error {
+	for {
+		select {
+		case <-item.ctx.Done():
+			return item.ctx.Err()
+		case resp, ok := <-item.StreamChan:
+			if !ok {
+				return nil
+			}
+			if err := t.handleTts(item.ctx, resp); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // getAlignedDuration 计算当前时间与开始时间的差值，向上对齐到frameDuration
