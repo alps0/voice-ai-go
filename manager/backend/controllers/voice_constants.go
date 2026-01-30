@@ -1,5 +1,7 @@
 package controllers
 
+import "strings"
+
 // VoiceOption 音色选项
 type VoiceOption struct {
 	Value string `json:"value"` // 音色值
@@ -192,6 +194,122 @@ var VoiceOptions = map[string][]VoiceOption{
 		{Value: "zh_female_yingtaowanzi_mars_bigtts", Label: "樱桃丸子（女声）"},
 		{Value: "zh_male_silang_mars_bigtts", Label: "四郎（男声）"},
 	},
+
+	// Minimax TTS 音色列表
+	// 参考：https://www.minimaxi.com/document/guides/tts-model
+	"minimax": {
+		// 中文 (普通话)
+		{Value: "male-qn-qingse", Label: "青涩青年音色"},
+		{Value: "male-qn-jingying", Label: "精英青年音色"},
+		{Value: "male-qn-badao", Label: "霸道青年音色"},
+		{Value: "male-qn-daxuesheng", Label: "青年大学生音色"},
+		{Value: "female-shaonv", Label: "少女音色"},
+		{Value: "female-yujie", Label: "御姐音色"},
+		{Value: "female-chengshu", Label: "成熟女性音色"},
+		{Value: "female-tianmei", Label: "甜美女性音色"},
+		{Value: "male-qn-qingse-jingpin", Label: "青涩青年音色-beta"},
+		{Value: "male-qn-jingying-jingpin", Label: "精英青年音色-beta"},
+		{Value: "male-qn-badao-jingpin", Label: "霸道青年音色-beta"},
+		{Value: "male-qn-daxuesheng-jingpin", Label: "青年大学生音色-beta"},
+		{Value: "female-shaonv-jingpin", Label: "少女音色-beta"},
+		{Value: "female-yujie-jingpin", Label: "御姐音色-beta"},
+		{Value: "female-chengshu-jingpin", Label: "成熟女性音色-beta"},
+		{Value: "female-tianmei-jingpin", Label: "甜美女性音色-beta"},
+		{Value: "clever_boy", Label: "聪明男童"},
+		{Value: "cute_boy", Label: "可爱男童"},
+		{Value: "lovely_girl", Label: "萌萌女童"},
+		{Value: "cartoon_pig", Label: "卡通猪小琪"},
+		{Value: "bingjiao_didi", Label: "病娇弟弟"},
+		{Value: "junlang_nanyou", Label: "俊朗男友"},
+		{Value: "chunzhen_xuedi", Label: "纯真学弟"},
+		{Value: "lengdan_xiongzhang", Label: "冷淡学长"},
+		{Value: "badao_shaoye", Label: "霸道少爷"},
+		{Value: "tianxin_xiaoling", Label: "甜心小玲"},
+		{Value: "qiaopi_mengmei", Label: "俏皮萌妹"},
+		{Value: "wumei_yujie", Label: "妩媚御姐"},
+		{Value: "diadia_xuemei", Label: "嗲嗲学妹"},
+		{Value: "danya_xuejie", Label: "淡雅学姐"},
+		{Value: "Chinese (Mandarin)_Reliable_Executive", Label: "沉稳高管"},
+		{Value: "Chinese (Mandarin)_News_Anchor", Label: "新闻女声"},
+		{Value: "Chinese (Mandarin)_Mature_Woman", Label: "傲娇御姐"},
+		{Value: "Chinese (Mandarin)_Unrestrained_Young_Man", Label: "不羁青年"},
+		{Value: "Arrogant_Miss", Label: "嚣张小姐"},
+		{Value: "Robot_Armor", Label: "机械战甲"},
+		{Value: "Chinese (Mandarin)_Kind-hearted_Antie", Label: "热心大婶"},
+		{Value: "Chinese (Mandarin)_HK_Flight_Attendant", Label: "港普空姐"},
+		{Value: "Chinese (Mandarin)_Humorous_Elder", Label: "搞笑大爷"},
+		{Value: "Chinese (Mandarin)_Gentleman", Label: "温润男声"},
+		{Value: "Chinese (Mandarin)_Warm_Bestie", Label: "温暖闺蜜"},
+		{Value: "Chinese (Mandarin)_Male_Announcer", Label: "播报男声"},
+		{Value: "Chinese (Mandarin)_Sweet_Lady", Label: "甜美女声"},
+		{Value: "Chinese (Mandarin)_Southern_Young_Man", Label: "南方小哥"},
+		{Value: "Chinese (Mandarin)_Wise_Women", Label: "阅历姐姐"},
+		{Value: "Chinese (Mandarin)_Gentle_Youth", Label: "温润青年"},
+		{Value: "Chinese (Mandarin)_Warm_Girl", Label: "温暖少女"},
+		{Value: "Chinese (Mandarin)_Kind-hearted_Elder", Label: "花甲奶奶"},
+		{Value: "Chinese (Mandarin)_Cute_Spirit", Label: "憨憨萌兽"},
+		{Value: "Chinese (Mandarin)_Radio_Host", Label: "电台男主播"},
+		{Value: "Chinese (Mandarin)_Lyrical_Voice", Label: "抒情男声"},
+		{Value: "Chinese (Mandarin)_Straightforward_Boy", Label: "率真弟弟"},
+		{Value: "Chinese (Mandarin)_Sincere_Adult", Label: "真诚青年"},
+		{Value: "Chinese (Mandarin)_Gentle_Senior", Label: "温柔学姐"},
+		{Value: "Chinese (Mandarin)_Stubborn_Friend", Label: "嘴硬竹马"},
+		{Value: "Chinese (Mandarin)_Crisp_Girl", Label: "清脆少女"},
+		{Value: "Chinese (Mandarin)_Pure-hearted_Boy", Label: "清澈邻家弟弟"},
+		{Value: "Chinese (Mandarin)_Soft_Girl", Label: "柔和少女"},
+		// 中文 (粤语)
+		{Value: "Cantonese_ProfessionalHost（F)", Label: "专业女主持"},
+		{Value: "Cantonese_GentleLady", Label: "温柔女声"},
+		{Value: "Cantonese_ProfessionalHost（M)", Label: "专业男主持"},
+		{Value: "Cantonese_PlayfulMan", Label: "活泼男声"},
+		{Value: "Cantonese_CuteGirl", Label: "可爱女孩"},
+		{Value: "Cantonese_KindWoman", Label: "善良女声"},
+		// 英文
+		{Value: "Santa_Claus", Label: "Santa Claus"},
+		{Value: "Grinch", Label: "Grinch"},
+		{Value: "Rudolph", Label: "Rudolph"},
+		{Value: "Arnold", Label: "Arnold"},
+		{Value: "Charming_Santa", Label: "Charming Santa"},
+		{Value: "Charming_Lady", Label: "Charming Lady"},
+		{Value: "Sweet_Girl", Label: "Sweet Girl"},
+		{Value: "Cute_Elf", Label: "Cute Elf"},
+		{Value: "Attractive_Girl", Label: "Attractive Girl"},
+		{Value: "Serene_Woman", Label: "Serene Woman"},
+		{Value: "English_Trustworthy_Man", Label: "Trustworthy Man"},
+		{Value: "English_Graceful_Lady", Label: "Graceful Lady"},
+		{Value: "English_Aussie_Bloke", Label: "Aussie Bloke"},
+		{Value: "English_Whispering_girl", Label: "Whispering girl"},
+		{Value: "English_Diligent_Man", Label: "Diligent Man"},
+		{Value: "English_Gentle-voiced_man", Label: "Gentle-voiced man"},
+	},
+
+	// 阿里云千问 TTS 音色列表（基础列表，模型过滤由 GetAliyunQwenVoicesByModel 处理）
+	"aliyun_qwen": {
+		{Value: "Cherry", Label: "芊悦"},
+		{Value: "Serena", Label: "苏瑶"},
+		{Value: "Ethan", Label: "晨煦"},
+		{Value: "Chelsie", Label: "千雪"},
+		{Value: "Momo", Label: "茉兔"},
+		{Value: "Vivian", Label: "十三"},
+		{Value: "Moon", Label: "月白"},
+		{Value: "Maia", Label: "四月"},
+		{Value: "Kai", Label: "凯"},
+		{Value: "Nofish", Label: "不吃鱼"},
+		{Value: "Bella", Label: "萌宝"},
+		{Value: "Jennifer", Label: "詹妮弗"},
+		{Value: "Ryan", Label: "甜茶"},
+	},
+
+	// 智谱 TTS 音色列表
+	"zhipu": {
+		{Value: "tongtong", Label: "彤彤（默认音色）"},
+		{Value: "chuichui", Label: "锤锤"},
+		{Value: "xiaochen", Label: "小陈"},
+		{Value: "jam", Label: "动动动物圈jam音色"},
+		{Value: "kazi", Label: "动动动物圈kazi音色"},
+		{Value: "douji", Label: "动动动物圈douji音色"},
+		{Value: "luodo", Label: "动动动物圈luodo音色"},
+	},
 }
 
 // GetVoiceOptionsByProvider 根据provider获取音色列表
@@ -200,4 +318,31 @@ func GetVoiceOptionsByProvider(provider string) []VoiceOption {
 		return voices
 	}
 	return []VoiceOption{}
+}
+
+// GetAliyunQwenVoicesByModel 根据千问模型名称获取音色列表
+// 使用 qwen 包中的模型映射来获取准确的音色列表
+func GetAliyunQwenVoicesByModel(model string) []VoiceOption {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		// 如果没有模型，返回基础列表
+		return GetVoiceOptionsByProvider("aliyun_qwen")
+	}
+	
+	// 使用本地函数获取模型对应的音色列表
+	voices := GetVoicesByModel(model)
+	if voices == nil || len(voices) == 0 {
+		// 如果找不到对应模型的音色，返回基础列表
+		return GetVoiceOptionsByProvider("aliyun_qwen")
+	}
+	
+	// 将 VoiceInfo 转换为 VoiceOption
+	result := make([]VoiceOption, 0, len(voices))
+	for _, v := range voices {
+		result = append(result, VoiceOption{
+			Value: v.Value,
+			Label: v.Label,
+		})
+	}
+	return result
 }

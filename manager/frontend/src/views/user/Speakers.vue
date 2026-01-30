@@ -896,9 +896,12 @@ const handleTtsConfigChange = async (configId) => {
 
   try {
     // 从后端API获取该provider的完整音色列表
-    const response = await api.get('/user/voice-options', {
-      params: { provider: config.provider }
-    })
+    const params = { provider: config.provider }
+    // 总是带上config_id参数
+    if (configId) {
+      params.config_id = configId
+    }
+    const response = await api.get('/user/voice-options', { params })
     currentVoiceOptions.value = response.data.data || []
   } catch (error) {
     console.error('加载音色列表失败:', error)
@@ -973,6 +976,32 @@ const extractVoiceOptions = (provider, config) => {
         { label: '韩语女', value: '韩语女' }
       ]
       cosyVoices.forEach(v => {
+        if (!options.find(o => o.value === v.value)) {
+          options.push(v)
+        }
+      })
+      break
+      
+    case 'minimax':
+      // Minimax TTS 使用 voice
+      if (config.voice) {
+        options.push({ label: config.voice, value: config.voice })
+      }
+      const minimaxVoices = [
+        { label: '青涩（男声）', value: 'male-qn-qingse' },
+        { label: '青涩（女声）', value: 'female-qn-qingse' },
+        { label: '少年（男声）', value: 'male-shaonian' },
+        { label: '少年（女声）', value: 'female-shaonian' },
+        { label: '成熟（男声）', value: 'male-chengshu' },
+        { label: '成熟（女声）', value: 'female-chengshu' },
+        { label: '温暖（男声）', value: 'male-wennuan' },
+        { label: '温暖（女声）', value: 'female-wennuan' },
+        { label: '清朗（男声）', value: 'male-qinglang' },
+        { label: '清朗（女声）', value: 'female-qinglang' },
+        { label: '厚重（男声）', value: 'male-houzhong' },
+        { label: '厚重（女声）', value: 'female-houzhong' }
+      ]
+      minimaxVoices.forEach(v => {
         if (!options.find(o => o.value === v.value)) {
           options.push(v)
         }

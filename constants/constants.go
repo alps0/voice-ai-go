@@ -26,4 +26,7 @@ const (
 	TtsTypeEdgeOffline = "edge_offline"
 	TtsTypeXiaozhi     = "xiaozhi"
 	TtsTypeOpenAI      = "openai"
+	TtsTypeZhipu       = "zhipu"
+	TtsTypeMinimax     = "minimax"
+	TtsTypeAliyunQwen  = "aliyun_qwen"
 )
