@@ -231,6 +231,9 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 							//realtime模式下, 如果此时有正在进行的llm和tts则取消掉
 							log.Debugf("realtime模式vad打断下 && 语音时长超过%d ms 如果此时有正在进行的llm和tts则取消掉", continuousVoiceDuration)
 							state.AfterAsrSessionCtx.Cancel()
+							if a.session != nil {
+								a.session.InterruptAndClearTTSQueue()
+							}
 							hasTriggeredCancel = true // 标记为已触发
 						}
 					}
@@ -472,6 +475,9 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 				if state.IsRealTime() && viper.GetInt("chat.realtime_mode") == 2 {
 					log.Debugf("OnListenStart realtime模式下, 停止当前的llm和tts")
 					state.AfterAsrSessionCtx.Cancel()
+					if a.session != nil {
+						a.session.InterruptAndClearTTSQueue()
+					}
 				}
 
 				// 重置重试计数器

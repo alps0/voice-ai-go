@@ -176,6 +176,7 @@ func NewChatSession(clientState *ClientState, serverTransport *ServerTransport, 
 		log.Debugf("ASR首次返回字符: device=%s, text=%s, isFinal=%v", clientState.DeviceID, text, isFinal)
 		if clientState.IsRealTime() && viper.GetInt("chat.realtime_mode") == 4 {
 			clientState.AfterAsrSessionCtx.Cancel()
+			s.InterruptAndClearTTSQueue()
 		}
 	}
 
@@ -658,6 +659,11 @@ func (s *ChatSession) GetRandomGreeting() string {
 func (s *ChatSession) AddTextToTTSQueue(text string) error {
 	s.llmManager.AddTextToTTSQueue(text)
 	return nil
+}
+
+// InterruptAndClearTTSQueue 触发 TTS 打断并清空发送队列（供 realtime 模式 VAD 打断等场景调用）
+func (s *ChatSession) InterruptAndClearTTSQueue() {
+	s.ttsManager.InterruptAndClearQueue()
 }
 
 // handleAbortMessage 处理中止消息

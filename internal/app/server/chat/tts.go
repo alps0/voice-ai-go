@@ -55,6 +55,7 @@ type TTSManager struct {
 	serverTransport   *ServerTransport
 	ttsQueue          *util.Queue[TTSQueueItem]
 	sessionAudioQueue chan AudioQueueElem // 会话级全局音频队列，兼容帧与控制消息
+	interruptCh       chan struct{}       // 打断信号：收到后 runSenderLoop 清空 sessionAudioQueue 并继续
 
 	// 聊天历史音频缓存：持续累积多段TTS音频（Opus帧数组）
 	audioHistoryBuffer [][]byte
@@ -68,6 +69,7 @@ func NewTTSManager(clientState *ClientState, serverTransport *ServerTransport, o
 		serverTransport:   serverTransport,
 		ttsQueue:          util.NewQueue[TTSQueueItem](10),
 		sessionAudioQueue: make(chan AudioQueueElem, SessionAudioQueueCap),
+		interruptCh:       make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -81,7 +83,7 @@ func (t *TTSManager) Start(ctx context.Context) {
 	t.processTTSQueue(ctx)
 }
 
-// runSenderLoop 唯一发送协程：从 sessionAudioQueue 取元素按类型分发，流控集中在此；ctx 取消时清空队列并退出
+// runSenderLoop 唯一发送协程：从 sessionAudioQueue 取元素按类型分发，流控集中在此；仅 ctx 取消时退出；SessionCtx 取消或收到 TurnAbort 时清空队列并继续
 func (t *TTSManager) runSenderLoop(ctx context.Context) {
 	frameDuration := time.Duration(t.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond
 	cacheFrameCount := 120 / t.clientState.OutputAudioFormat.FrameDuration
@@ -92,10 +94,13 @@ func (t *TTSManager) runSenderLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			//_ = t.serverTransport.SendTtsStop()
 			t.drainSessionAudioQueue()
 			log.Debugf("runSenderLoop ctx done, drained queue and exit")
 			return
+		case <-t.interruptCh:
+			t.drainSessionAudioQueue()
+			log.Debugf("runSenderLoop interrupt, drained queue and continue")
+			continue
 		case elem, ok := <-t.sessionAudioQueue:
 			if !ok {
 				return
@@ -118,6 +123,9 @@ func (t *TTSManager) runSenderLoop(ctx context.Context) {
 					}
 				}
 			case AudioQueueKindFrame:
+				if totalFrames == 0 {
+					startTime = time.Now()
+				}
 				nextFrameTime := startTime.Add(time.Duration(totalFrames-cacheFrameCount) * frameDuration)
 				if now := time.Now(); now.Before(nextFrameTime) {
 					sleepDuration := nextFrameTime.Sub(now)
@@ -156,9 +164,8 @@ func (t *TTSManager) runSenderLoop(ctx context.Context) {
 				if err := t.serverTransport.SendTtsStart(); err != nil {
 					log.Errorf("发送 TtsStart 失败: %v", err)
 				}
-				// 新语音段：重置帧计数与起始时间，下一段按 cacheFrameCount 快速缓冲
+				// 新语音段：仅重置帧计数，startTime 在收到第一帧时设置
 				totalFrames = 0
-				startTime = time.Now()
 			case AudioQueueKindTtsStop:
 				// 精确等待：本段已发送 totalFrames 帧，等播放到最后一帧结束再发 TtsStop
 				expectedPlayEnd := startTime.Add(time.Duration(totalFrames) * frameDuration)
@@ -199,6 +206,14 @@ func (t *TTSManager) drainSessionAudioQueue() {
 // ClearSessionAudioQueue 清空会话级音频队列（可由外部在 ctx 取消时调用）
 func (t *TTSManager) ClearSessionAudioQueue() {
 	t.drainSessionAudioQueue()
+}
+
+// InterruptAndClearQueue 触发打断：通知 runSenderLoop 清空 sessionAudioQueue 后继续运行（非阻塞）
+func (t *TTSManager) InterruptAndClearQueue() {
+	select {
+	case t.interruptCh <- struct{}{}:
+	default:
+	}
 }
 
 // EnqueueTtsStart 向会话级音频队列投递 TtsStart，由 runSenderLoop 统一发送；队列满时阻塞直到入队或 ctx.Done
