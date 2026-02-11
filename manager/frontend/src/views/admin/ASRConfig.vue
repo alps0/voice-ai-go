@@ -178,6 +178,18 @@ const form = reactive({
     enable_ddc: false,
     chunk_duration: 200,
     timeout: 30
+  },
+  aliyun_qwen3: {
+    api_key: '',
+    ws_url: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
+    model: 'qwen3-asr-flash-realtime',
+    format: 'pcm',
+    sample_rate: 16000,
+    language: 'zh',
+    auto_end: true,
+    vad_threshold: 0.0,
+    vad_silence_ms: 400,
+    timeout: 30
   }
 })
 
@@ -226,6 +238,17 @@ const rules = computed(() => {
       'doubao.model_name': [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
       'doubao.end_window_size': [{ required: true, message: '请输入结束窗口大小', trigger: 'blur' }],
       'doubao.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
+    }
+  }
+  if (form.provider === 'aliyun_qwen3') {
+    return {
+      ...base,
+      'aliyun_qwen3.ws_url': [{ required: true, message: '请输入WS URL', trigger: 'blur' }],
+      'aliyun_qwen3.model': [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
+      'aliyun_qwen3.format': [{ required: true, message: '请选择音频格式', trigger: 'change' }],
+      'aliyun_qwen3.sample_rate': [{ required: true, message: '请选择采样率', trigger: 'change' }],
+      'aliyun_qwen3.language': [{ required: true, message: '请输入语言', trigger: 'blur' }],
+      'aliyun_qwen3.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
     }
   }
   return base
@@ -288,6 +311,12 @@ const editConfig = (config) => {
     } else if (config.provider === 'doubao' && (configObj.appid || configObj.access_token)) {
       // 新格式：直接包含配置内容
       form.doubao = { ...form.doubao, ...configObj }
+    } else if (configObj.aliyun_qwen3) {
+      // 旧格式：包含provider层
+      form.aliyun_qwen3 = { ...form.aliyun_qwen3, ...configObj.aliyun_qwen3 }
+    } else if (config.provider === 'aliyun_qwen3' && (configObj.ws_url || configObj.model || configObj.api_key)) {
+      // 新格式：直接包含配置内容
+      form.aliyun_qwen3 = { ...form.aliyun_qwen3, ...configObj }
     }
   } catch (error) {
     console.error('解析配置JSON失败:', error)
@@ -528,6 +557,18 @@ const resetForm = () => {
     enable_itn: true,
     enable_ddc: false,
     chunk_duration: 200,
+    timeout: 30
+  }
+  form.aliyun_qwen3 = {
+    api_key: '',
+    ws_url: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
+    model: 'qwen3-asr-flash-realtime',
+    format: 'pcm',
+    sample_rate: 16000,
+    language: 'zh',
+    auto_end: true,
+    vad_threshold: 0.0,
+    vad_silence_ms: 400,
     timeout: 30
   }
 }
