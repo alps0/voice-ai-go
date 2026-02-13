@@ -1030,7 +1030,7 @@ func fillResultError(result gin.H, types []string, keys ...string) {
 
 // OTATestResult OTA测试结果结构
 type OTATestResult struct {
-	WebSocket   OTATestItem `json:"websocket"`
+	WebSocket   OTATestItem  `json:"websocket"`
 	MQTTUDP     *OTATestItem `json:"mqtt_udp,omitempty"`
 	OTAResponse string       `json:"ota_response,omitempty"` // OTA接口响应内容
 }
@@ -1063,19 +1063,19 @@ type UDPConfig struct {
 
 // helloMessage MQTT hello消息结构
 type helloMessage struct {
-	Type      string      `json:"type"`
-	Version   int         `json:"version"`
-	Transport string      `json:"transport"`
+	Type        string      `json:"type"`
+	Version     int         `json:"version"`
+	Transport   string      `json:"transport"`
 	AudioParams interface{} `json:"audio_params,omitempty"`
 }
 
 // helloResponse MQTT hello响应结构（与test/mqtt_udp保持一致）
 type helloResponse struct {
-	Type      string    `json:"type"`
-	SessionID string    `json:"session_id"`
-	Transport string    `json:"transport"`
-	UDP       UDPConfig `json:"udp"`
-	Version   int       `json:"version"`
+	Type        string    `json:"type"`
+	SessionID   string    `json:"session_id"`
+	Transport   string    `json:"transport"`
+	UDP         UDPConfig `json:"udp"`
+	Version     int       `json:"version"`
 	AudioParams struct {
 		Format        string `json:"format"`
 		SampleRate    int    `json:"sample_rate"`
@@ -3795,7 +3795,7 @@ func (ac *AdminController) SetDefaultMemoryConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "设置默认Memory配置成功", "data": config})
 }
 
-// generateMCPToken 生成包含智能体ID、用户ID和签发时间的JWT Token
+// generateMCPToken 生成稳定的MCP JWT Token（同一agentID+userID下保持不变）
 func generateMCPToken(agentID string, userID uint) (string, error) {
 	// 创建自定义的JWT Claims
 	type MCPClaims struct {
@@ -3809,17 +3809,14 @@ func generateMCPToken(agentID string, userID uint) (string, error) {
 	// 构建endpointId
 	endpointID := fmt.Sprintf("agent_%s", agentID)
 
-	// 创建JWT claims
+	// 创建JWT claims。
+	// 不设置iat/exp，保证token长期有效且同一agentID+userID生成结果稳定一致。
 	claims := MCPClaims{
-		UserID:     userID,
-		AgentID:    agentID,
-		EndpointID: endpointID,
-		Purpose:    "mcp-endpoint",
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt: jwt.NewNumericDate(time.Now()),
-			// 设置24小时过期时间
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-		},
+		UserID:           userID,
+		AgentID:          agentID,
+		EndpointID:       endpointID,
+		Purpose:          "mcp-endpoint",
+		RegisteredClaims: jwt.RegisteredClaims{},
 	}
 
 	// 使用HS256算法生成JWT token
