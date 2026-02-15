@@ -3892,7 +3892,7 @@ func (ac *AdminController) SetDefaultMemoryConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "设置默认Memory配置成功", "data": config})
 }
 
-// generateMCPToken 生成包含智能体ID、用户ID和签发时间的JWT Token
+// generateMCPToken 生成稳定的MCP JWT Token（同一agentID+userID下保持不变）
 func generateMCPToken(agentID string, userID uint) (string, error) {
 	// 创建自定义的JWT Claims
 	type MCPClaims struct {
@@ -3906,17 +3906,14 @@ func generateMCPToken(agentID string, userID uint) (string, error) {
 	// 构建endpointId
 	endpointID := fmt.Sprintf("agent_%s", agentID)
 
-	// 创建JWT claims
+	// 创建JWT claims。
+	// 不设置iat/exp，保证token长期有效且同一agentID+userID生成结果稳定一致。
 	claims := MCPClaims{
-		UserID:     userID,
-		AgentID:    agentID,
-		EndpointID: endpointID,
-		Purpose:    "mcp-endpoint",
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt: jwt.NewNumericDate(time.Now()),
-			// 设置24小时过期时间
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-		},
+		UserID:           userID,
+		AgentID:          agentID,
+		EndpointID:       endpointID,
+		Purpose:          "mcp-endpoint",
+		RegisteredClaims: jwt.RegisteredClaims{},
 	}
 
 	// 使用HS256算法生成JWT token

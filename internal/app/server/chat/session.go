@@ -639,7 +639,7 @@ func (s *ChatSession) HandleWelcome() {
 	ctx := s.clientState.AfterAsrSessionCtx.Get(sessionCtx)
 
 	s.ttsManager.EnqueueTtsStart(s.clientState.Ctx)
-	s.ttsManager.handleTts(ctx, llm_common.LLMResponseStruct{Text: greetingText}, nil, nil)
+	s.ttsManager.handleTts(ctx, s.ttsManager.currentAudioGeneration(), llm_common.LLMResponseStruct{Text: greetingText}, nil, nil)
 	s.ttsManager.EnqueueTtsStop(s.clientState.Ctx)
 
 	s.clientState.IsWelcomeSpeaking = true
@@ -937,11 +937,11 @@ func (s *ChatSession) Close() {
 			s.cancel()
 		}
 
-		// 停止说话和清理音频相关资源
-		s.StopSpeaking(true)
-
 		// 清理聊天文本队列
 		s.ClearChatTextQueue()
+
+		// 停止说话和清理音频相关资源
+		s.StopSpeaking(true)
 
 		// 关闭服务端传输
 		if s.serverTransport != nil {
